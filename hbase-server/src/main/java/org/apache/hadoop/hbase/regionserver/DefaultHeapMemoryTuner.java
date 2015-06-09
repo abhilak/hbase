@@ -49,6 +49,7 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
 
   public static final String STEP_KEY = "hbase.regionserver.heapmemory.autotuner.step";
   public static final float DEFAULT_STEP_VALUE = 0.02f; // 2%
+  public static final float tolerance = 0.00f;
   public static final int maxNumLookupPeriods = 20;
 
   private static final TunerResult TUNER_RESULT = new TunerResult(true);
@@ -67,8 +68,9 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
 
   private boolean stepDirection;  // true if last time tuner increased block cache size 
   private boolean isFirstTuning = true;
-  private long prevFlushCount;
-  private long prevEvictCount;
+  private long prevFlushCount = 0;
+  private long prevEvictCount = 0;
+  private long prevCacheMissCount = 0;
 
   
   @Override
@@ -78,12 +80,19 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     long evictCount = context.getEvictCount();
     long writeRequestCount = context.getWriteRequestCount();
     long readRequestCount = context.getReadRequestCount();
-    boolean memstoreSufficient = blockedFlushCount == 0 && unblockedFlushCount == 0;
-    boolean blockCacheSufficient = evictCount == 0;
-    boolean loadSenario = checkLoadSenario(writeRequestCount,readRequestCount);
+    long cacheMissCount = context.getCacheMissCount();
+    //we can consider memstore or block cache to be sufficient if
+    //less than 50% of it is being used
+    boolean memstoreSufficient = (blockedFlushCount == 0 && unblockedFlushCount == 0)
+    		|| context.getCurMemStoreUsed()*2 < context.getCurMemStoreSize();
+    boolean blockCacheSufficient = evictCount == 0 ||
+    		context.getCurBlockCacheUsed()*2 < context.getCurBlockCacheSize();
+    // not using read / write count as they are very noisy
+    //boolean loadSenario = checkLoadSenario(writeRequestCount,readRequestCount);
     if (memstoreSufficient && blockCacheSufficient) {
       prevFlushCount = blockedFlushCount + unblockedFlushCount;
       prevEvictCount = evictCount;
+      prevCacheMissCount = cacheMissCount;
       return NO_OP_TUNER_RESULT;
     }
     float newMemstoreSize;
@@ -95,20 +104,29 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
       // Increase the memstore size and corresponding decrease in block cache size
       stepDirection = false;
     } else if(!isFirstTuning) {
-	  float percentChangeInEvictCount  = (float)(evictCount-prevEvictCount)/(float)(prevEvictCount);
+	  float percentChangeInEvictCount  = (float)(evictCount-prevEvictCount)/(float)(evictCount);
 	  float percentChangeInFlushes =
-	  (float)(blockedFlushCount + unblockedFlushCount-prevFlushCount)/(float)(prevFlushCount);
+	  (float)(blockedFlushCount + unblockedFlushCount-prevFlushCount)/(float)(blockedFlushCount
+			  + unblockedFlushCount);
 	  //Negative is desirable , should repeat previous step
 	  //if it is positive , we should move in opposite direction
-	  if (percentChangeInEvictCount + percentChangeInFlushes > 0.0) {
+	  if (percentChangeInEvictCount + percentChangeInFlushes > tolerance) {
 		//revert last step if it went wrong
 		stepDirection = !stepDirection;
 	  } else {
 		//last step was useful, taking step based on current stats
-		stepDirection = loadSenario;
+		if(cacheMissCount == 0)  
+		{
+			stepDirection = false;
+		} else {
+			stepDirection = (float)(cacheMissCount-prevCacheMissCount)/(float)(cacheMissCount) >
+							percentChangeInFlushes;
+		}
 	  }
     } else {
-      stepDirection = loadSenario;
+    	//currently taking a random step
+    	//TODO compare avg flush count and block cache size
+      stepDirection = true;
     }
     
     if (stepDirection){
@@ -132,6 +150,7 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     TUNER_RESULT.setMemstoreSize(newMemstoreSize);
     prevFlushCount = blockedFlushCount + unblockedFlushCount;
     prevEvictCount = evictCount;
+    prevCacheMissCount = cacheMissCount;
     isFirstTuning = false;
     return TUNER_RESULT;
   }

@@ -220,6 +220,7 @@ public class HeapMemoryManager {
     private long evictCount = 0;
     private long writeRequestCount = 0;
     private long readRequestCount =0;
+    private long cacheMissCount = 0;
     private TunerContext tunerContext = new TunerContext();
     private boolean alarming = false;
 
@@ -272,9 +273,13 @@ public class HeapMemoryManager {
       long curEvictCount;
       long curWriteRequestCount;
       long curReadRequestCount;
+      long curCacheMisCount;
       curEvictCount = blockCache.getStats().getEvictedCount();
       tunerContext.setEvictCount(curEvictCount - evictCount);
       evictCount =  curEvictCount;
+      curCacheMisCount = blockCache.getStats().getMissCachingCount();
+      tunerContext.setCacheMissCount(curCacheMisCount-cacheMissCount);
+      cacheMissCount = curCacheMisCount;
       curWriteRequestCount = server.getWriteRequestCount();
       tunerContext.setWriteRequestCount(curWriteRequestCount - writeRequestCount);
       writeRequestCount = curWriteRequestCount;
@@ -283,6 +288,9 @@ public class HeapMemoryManager {
       readRequestCount = curReadRequestCount;
       tunerContext.setBlockedFlushCount(blockedFlushCount.getAndSet(0));
       tunerContext.setUnblockedFlushCount(unblockedFlushCount.getAndSet(0));
+      tunerContext.setCurBlockCacheUsed((float)blockCache.getCurrentSize() / maxHeapSize);
+      tunerContext.setCurMemStoreUsed(
+    		  (float)server.getRegionServerAccounting().getGlobalMemstoreSize() / maxHeapSize);
       tunerContext.setCurBlockCacheSize(blockCachePercent);
       tunerContext.setCurMemStoreSize(globalMemStorePercent);
       LOG.info("Data passed to HeapMemoryTuner : " + evictCount + " "
@@ -369,6 +377,9 @@ public class HeapMemoryManager {
     private long evictCount;
     private long readRequestCount;
     private long writeRequestCount;
+    private long cacheMissCount;
+    private float curBlockCacheUsed;
+    private float curMemStoreUsed;
     private float curMemStoreSize;
     private float curBlockCacheSize;
 
@@ -426,6 +437,30 @@ public class HeapMemoryManager {
 
 	public void setWriteRequestCount(long writeRequestCount) {
 		this.writeRequestCount = writeRequestCount;
+	}
+
+	public long getCacheMissCount() {
+		return cacheMissCount;
+	}
+
+	public void setCacheMissCount(long cacheMissCount) {
+		this.cacheMissCount = cacheMissCount;
+	}
+
+	public float getCurBlockCacheUsed() {
+		return curBlockCacheUsed;
+	}
+
+	public void setCurBlockCacheUsed(float curBlockCacheUsed) {
+		this.curBlockCacheUsed = curBlockCacheUsed;
+	}
+
+	public float getCurMemStoreUsed() {
+		return curMemStoreUsed;
+	}
+
+	public void setCurMemStoreUsed(float d) {
+		this.curMemStoreUsed = d;
 	}
   }
 

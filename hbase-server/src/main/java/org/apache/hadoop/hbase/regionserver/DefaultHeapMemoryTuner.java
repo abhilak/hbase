@@ -24,10 +24,6 @@ import static org.apache.hadoop.hbase.HConstants.HFILE_BLOCK_CACHE_SIZE_KEY;
 import static org.apache.hadoop.hbase.regionserver.HeapMemoryManager.MEMSTORE_SIZE_MAX_RANGE_KEY;
 import static org.apache.hadoop.hbase.regionserver.HeapMemoryManager.MEMSTORE_SIZE_MIN_RANGE_KEY;
 
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Queue;
-
 import org.apache.hadoop.hbase.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HConstants;
@@ -49,93 +45,130 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
 
   public static final String STEP_KEY = "hbase.regionserver.heapmemory.autotuner.step";
   public static final float DEFAULT_STEP_VALUE = 0.02f; // 2%
-  public static final float tolerance = 0.00f;
-  public static final int maxNumLookupPeriods = 20;
-
+  // Fraction change less than this will not be considered harmful
+  // TODO dynamically calculate tolerance from standard deviation of percent changes
+  public static final float tolerance = 0.00f; // 0%
+  // If current block cache size or memstore size in use is below this level relative to memory 
+  // provided to it then corresponding component will be considered to have sufficient memory
+  public static final float sufficientMemoryLevel = 0.5f; // 50%
+  // Large constant value assigned to percent changes when its undefined
+  public static final float undefinedPercentChange = 100f;
   private static final TunerResult TUNER_RESULT = new TunerResult(true);
   private static final TunerResult NO_OP_TUNER_RESULT = new TunerResult(false);
 
   private Configuration conf;
   private float step = DEFAULT_STEP_VALUE;
-  private Queue<Long> prevWriteCounts = new LinkedList<Long>();
-  private Queue<Long> prevReadCounts = new LinkedList<Long>();
-  private int lookupCounts = 0;
 
   private float globalMemStorePercentMinRange;
   private float globalMemStorePercentMaxRange;
   private float blockCachePercentMinRange;
   private float blockCachePercentMaxRange;
 
-  private boolean stepDirection;  // true if last time tuner increased block cache size 
-  private boolean isFirstTuning = true;
+  private StepDirection stepDirection = StepDirection.NEUTRAL;
   private long prevFlushCount = 0;
   private long prevEvictCount = 0;
   private long prevCacheMissCount = 0;
-
   
   @Override
   public TunerResult tune(TunerContext context) {
     long blockedFlushCount = context.getBlockedFlushCount();
     long unblockedFlushCount = context.getUnblockedFlushCount();
     long evictCount = context.getEvictCount();
-    long writeRequestCount = context.getWriteRequestCount();
-    long readRequestCount = context.getReadRequestCount();
     long cacheMissCount = context.getCacheMissCount();
-    //we can consider memstore or block cache to be sufficient if
-    //less than 50% of it is being used
+    // We can consider memstore or block cache to be sufficient if
+    // we are using only a minor fraction of what have been already provided to it
     boolean memstoreSufficient = (blockedFlushCount == 0 && unblockedFlushCount == 0)
-    		|| context.getCurMemStoreUsed()*2 < context.getCurMemStoreSize();
+            || context.getCurMemStoreUsed() < context.getCurMemStoreSize()*sufficientMemoryLevel;
     boolean blockCacheSufficient = evictCount == 0 ||
-    		context.getCurBlockCacheUsed()*2 < context.getCurBlockCacheSize();
-    // not using read / write count as they are very noisy
-    //boolean loadSenario = checkLoadSenario(writeRequestCount,readRequestCount);
+            context.getCurBlockCacheUsed() < context.getCurBlockCacheSize()*sufficientMemoryLevel;
     if (memstoreSufficient && blockCacheSufficient) {
       prevFlushCount = blockedFlushCount + unblockedFlushCount;
       prevEvictCount = evictCount;
       prevCacheMissCount = cacheMissCount;
+      stepDirection = StepDirection.NEUTRAL;
       return NO_OP_TUNER_RESULT;
     }
     float newMemstoreSize;
     float newBlockCacheSize;
     if (memstoreSufficient) {
       // Increase the block cache size and corresponding decrease in memstore size
-      stepDirection = true;
+      stepDirection = StepDirection.INCREASE_BLOCK_CACHE_SIZE;
     } else if (blockCacheSufficient) {
       // Increase the memstore size and corresponding decrease in block cache size
-      stepDirection = false;
-    } else if(!isFirstTuning) {
-	  float percentChangeInEvictCount  = (float)(evictCount-prevEvictCount)/(float)(evictCount);
-	  float percentChangeInFlushes =
-	  (float)(blockedFlushCount + unblockedFlushCount-prevFlushCount)/(float)(blockedFlushCount
-			  + unblockedFlushCount);
-	  //Negative is desirable , should repeat previous step
-	  //if it is positive , we should move in opposite direction
-	  if (percentChangeInEvictCount + percentChangeInFlushes > tolerance) {
-		//revert last step if it went wrong
-		stepDirection = !stepDirection;
-	  } else {
-		//last step was useful, taking step based on current stats
-		if(cacheMissCount == 0)  
-		{
-			stepDirection = false;
-		} else {
-			stepDirection = (float)(cacheMissCount-prevCacheMissCount)/(float)(cacheMissCount) >
-							percentChangeInFlushes;
-		}
-	  }
+      stepDirection = StepDirection.INCREASE_MEMSTORE_SIZE;
     } else {
-    	//currently taking a random step
-    	//TODO compare avg flush count and block cache size
-      stepDirection = true;
+      float percentChangeInEvictCount;
+      float percentChangeInFlushes;
+      float percentChangeInMisses;
+      if (prevEvictCount != 0) {
+        percentChangeInEvictCount  = (float)(evictCount-prevEvictCount)/(float)(prevEvictCount);
+      } else {
+        // current and prev are both cannot be zero, assinging large percent change
+        percentChangeInEvictCount  = undefinedPercentChange;
+      }
+      if (prevFlushCount != 0) {
+        percentChangeInFlushes = (float)(blockedFlushCount + unblockedFlushCount - 
+            prevFlushCount)/(float)(prevFlushCount);
+      } else {
+        percentChangeInFlushes = undefinedPercentChange;
+      }
+      if (prevCacheMissCount != 0) {
+        percentChangeInMisses = (float)(cacheMissCount-prevCacheMissCount)/(float)(prevCacheMissCount);
+      } else {
+        percentChangeInMisses = undefinedPercentChange;
+      }
+      boolean isReverting = false;
+      switch (stepDirection) {
+      case INCREASE_BLOCK_CACHE_SIZE:
+        if (percentChangeInEvictCount + percentChangeInFlushes > tolerance) {
+          // reverting previous step as it was not useful
+          stepDirection = StepDirection.INCREASE_MEMSTORE_SIZE;
+          isReverting = true;
+        }
+        break;
+      case INCREASE_MEMSTORE_SIZE:
+        if (percentChangeInEvictCount + percentChangeInFlushes > tolerance) {
+          // reverting previous step as it was not useful
+          stepDirection = StepDirection.INCREASE_BLOCK_CACHE_SIZE;
+          isReverting = true;
+        }
+        break;
+      default:
+        // last step was neutral, revert doesn't not apply here
+        break;
+      }
+      if (!isReverting){
+        if (percentChangeInEvictCount < 0 && percentChangeInFlushes < 0) {
+          // Everything is fine no tuning required
+          stepDirection = StepDirection.NEUTRAL;
+        } else if (percentChangeInMisses > percentChangeInFlushes + tolerance) {
+          // more misses , increasing cahce size
+          stepDirection = StepDirection.INCREASE_BLOCK_CACHE_SIZE;
+        } else if (percentChangeInFlushes > percentChangeInMisses + tolerance){
+          // more flushes , increasing memstore size
+          stepDirection = StepDirection.INCREASE_MEMSTORE_SIZE;
+        } else {
+          // Default. Not enough facts to do tuning.
+          stepDirection = StepDirection.NEUTRAL;
+        }
+      }
     }
-    
-    if (stepDirection){
-      newBlockCacheSize = context.getCurBlockCacheSize() + step;
-      newMemstoreSize = context.getCurMemStoreSize() - step;
-    } else {
-	  newBlockCacheSize = context.getCurBlockCacheSize() - step;
-	  newMemstoreSize = context.getCurMemStoreSize() + step;
-    }  
+    switch (stepDirection) {
+    case INCREASE_BLOCK_CACHE_SIZE:
+        newBlockCacheSize = context.getCurBlockCacheSize() + step;
+        newMemstoreSize = context.getCurMemStoreSize() - step;
+        break;
+    case INCREASE_MEMSTORE_SIZE:
+        newBlockCacheSize = context.getCurBlockCacheSize() - step;
+        newMemstoreSize = context.getCurMemStoreSize() + step;
+        break;
+    default:
+        prevFlushCount = blockedFlushCount + unblockedFlushCount;
+        prevEvictCount = evictCount;
+        prevCacheMissCount = cacheMissCount;
+        stepDirection = StepDirection.NEUTRAL;
+        return NO_OP_TUNER_RESULT;
+    }
     if (newMemstoreSize > globalMemStorePercentMaxRange) {
       newMemstoreSize = globalMemStorePercentMaxRange;
     } else if (newMemstoreSize < globalMemStorePercentMinRange) {
@@ -151,7 +184,6 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     prevFlushCount = blockedFlushCount + unblockedFlushCount;
     prevEvictCount = evictCount;
     prevCacheMissCount = cacheMissCount;
-    isFirstTuning = false;
     return TUNER_RESULT;
   }
 
@@ -173,28 +205,13 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     this.globalMemStorePercentMaxRange = conf.getFloat(MEMSTORE_SIZE_MAX_RANGE_KEY,
         HeapMemorySizeUtil.getGlobalMemStorePercent(conf, false));
   }
-  /*
-   * @Returns true if read it seems its getting read heavy
-   * and need to increase block cache size
-   */
-  private boolean checkLoadSenario(long writeRequestCount , long readRequestCount) {
-	  lookupCounts++;
-	  prevWriteCounts.offer(writeRequestCount);
-	  prevReadCounts.offer(readRequestCount);
-	  Iterator<Long> readCountIterator = prevReadCounts.iterator();
-	  Iterator<Long> writeCountIterator = prevWriteCounts.iterator();
-	  int loadCount = 0;
-	  while(readCountIterator.hasNext() && writeCountIterator.hasNext()){
-		  if (readCountIterator.next() > writeCountIterator.next()) {
-			 loadCount++;
-		  } else {
-			loadCount--;
-		  }
-		}
-	  if (lookupCounts > maxNumLookupPeriods){
-		 prevWriteCounts.poll();
-		 prevReadCounts.poll();
-	  }
-	  return (loadCount>=0);
+  
+  private enum StepDirection{
+    // block cache size was increased
+    INCREASE_BLOCK_CACHE_SIZE,
+    // memstore size was increased
+    INCREASE_MEMSTORE_SIZE,
+    // no operation was performed
+    NEUTRAL
   }
 }

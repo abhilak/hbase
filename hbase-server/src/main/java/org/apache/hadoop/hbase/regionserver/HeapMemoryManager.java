@@ -58,7 +58,7 @@ public class HeapMemoryManager {
       "hbase.regionserver.global.memstore.size.min.range";
   public static final String HBASE_RS_HEAP_MEMORY_TUNER_PERIOD = 
       "hbase.regionserver.heapmemory.tuner.period";
-  public static final int HBASE_RS_HEAP_MEMORY_TUNER_DEFAULT_PERIOD = 10 * 1000;
+  public static final int HBASE_RS_HEAP_MEMORY_TUNER_DEFAULT_PERIOD = 60 * 1000;
   public static final String HBASE_RS_HEAP_MEMORY_TUNER_CLASS = 
       "hbase.regionserver.heapmemory.tuner.class";
 
@@ -75,7 +75,8 @@ public class HeapMemoryManager {
 
   private final ResizableBlockCache blockCache;
   private final FlushRequester memStoreFlusher;
-  private final HRegionServer server;
+  private final Server server;
+  private final RegionServerAccounting regionServerAccounting;
 
   private HeapMemoryTunerChore heapMemTunerChore = null;
   private final boolean tunerOn;
@@ -85,21 +86,23 @@ public class HeapMemoryManager {
   private long maxHeapSize = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getMax();
 
   public static HeapMemoryManager create(Configuration conf, FlushRequester memStoreFlusher,
-		  HRegionServer server) {
+                Server server, RegionServerAccounting regionServerAccounting) {
     BlockCache blockCache = CacheConfig.instantiateBlockCache(conf);
     if (blockCache instanceof ResizableBlockCache) {
-      return new HeapMemoryManager((ResizableBlockCache) blockCache, memStoreFlusher, server);
+      return new HeapMemoryManager((ResizableBlockCache) blockCache, memStoreFlusher, server,
+                 regionServerAccounting);
     }
     return null;
   }
 
   @VisibleForTesting
   HeapMemoryManager(ResizableBlockCache blockCache, FlushRequester memStoreFlusher,
-		  HRegionServer server) {
+                Server server, RegionServerAccounting regionServerAccounting) {
     Configuration conf = server.getConfiguration();
     this.blockCache = blockCache;
     this.memStoreFlusher = memStoreFlusher;
     this.server = server;
+    this.regionServerAccounting = regionServerAccounting;
     this.tunerOn = doInit(conf);
     this.defaultChorePeriod = conf.getInt(HBASE_RS_HEAP_MEMORY_TUNER_PERIOD,
       HBASE_RS_HEAP_MEMORY_TUNER_DEFAULT_PERIOD);
@@ -181,7 +184,6 @@ public class HeapMemoryManager {
           + blockCachePercentMaxRange);
     }
     return true;
-    
   }
 
   public void start(ChoreService service) {
@@ -217,10 +219,8 @@ public class HeapMemoryManager {
     private HeapMemoryTuner heapMemTuner;
     private AtomicLong blockedFlushCount = new AtomicLong();
     private AtomicLong unblockedFlushCount = new AtomicLong();
-    private long evictCount = 0;
-    private long writeRequestCount = 0;
-    private long readRequestCount =0;
-    private long cacheMissCount = 0;
+    private long evictCount = 0L;
+    private long cacheMissCount = 0L;
     private TunerContext tunerContext = new TunerContext();
     private boolean alarming = false;
 
@@ -268,33 +268,23 @@ public class HeapMemoryManager {
     }
 
     private void tune() {
-      //TODO check if we can increase the memory boundaries 
-      //while remaining in the limits
+      // TODO check if we can increase the memory boundaries 
+      // while remaining in the limits
       long curEvictCount;
-      long curWriteRequestCount;
-      long curReadRequestCount;
       long curCacheMisCount;
       curEvictCount = blockCache.getStats().getEvictedCount();
       tunerContext.setEvictCount(curEvictCount - evictCount);
-      evictCount =  curEvictCount;
+      evictCount = curEvictCount;
       curCacheMisCount = blockCache.getStats().getMissCachingCount();
       tunerContext.setCacheMissCount(curCacheMisCount-cacheMissCount);
       cacheMissCount = curCacheMisCount;
-      curWriteRequestCount = server.getWriteRequestCount();
-      tunerContext.setWriteRequestCount(curWriteRequestCount - writeRequestCount);
-      writeRequestCount = curWriteRequestCount;
-      curReadRequestCount = server.getReadRequestCount();
-      tunerContext.setReadRequestCount(curReadRequestCount - readRequestCount);
-      readRequestCount = curReadRequestCount;
       tunerContext.setBlockedFlushCount(blockedFlushCount.getAndSet(0));
       tunerContext.setUnblockedFlushCount(unblockedFlushCount.getAndSet(0));
       tunerContext.setCurBlockCacheUsed((float)blockCache.getCurrentSize() / maxHeapSize);
       tunerContext.setCurMemStoreUsed(
-    		  (float)server.getRegionServerAccounting().getGlobalMemstoreSize() / maxHeapSize);
+                 (float)regionServerAccounting.getGlobalMemstoreSize() / maxHeapSize);
       tunerContext.setCurBlockCacheSize(blockCachePercent);
       tunerContext.setCurMemStoreSize(globalMemStorePercent);
-      LOG.info("Data passed to HeapMemoryTuner : " + evictCount + " "
-    	  + readRequestCount + " " + writeRequestCount);
       TunerResult result = null;
       try {
         result = this.heapMemTuner.tune(tunerContext);
@@ -346,7 +336,7 @@ public class HeapMemoryManager {
           memStoreFlusher.setGlobalMemstoreLimit(newMemstoreSize);
         }
       } else {
-    	LOG.info("No changes made by HeapMemoryTuner.");
+        LOG.info("No changes made by HeapMemoryTuner.");
       }
     }
 
@@ -375,8 +365,6 @@ public class HeapMemoryManager {
     private long blockedFlushCount;
     private long unblockedFlushCount;
     private long evictCount;
-    private long readRequestCount;
-    private long writeRequestCount;
     private long cacheMissCount;
     private float curBlockCacheUsed;
     private float curMemStoreUsed;
@@ -423,45 +411,29 @@ public class HeapMemoryManager {
       this.curBlockCacheSize = curBlockCacheSize;
     }
 
-	public long getReadRequestCount() {
-		return readRequestCount;
-	}
+    public long getCacheMissCount() {
+      return cacheMissCount;
+    }
 
-	public void setReadRequestCount(long readRequestCount) {
-		this.readRequestCount = readRequestCount;
-	}
+    public void setCacheMissCount(long cacheMissCount) {
+      this.cacheMissCount = cacheMissCount;
+    }
 
-	public long getWriteRequestCount() {
-		return writeRequestCount;
-	}
+    public float getCurBlockCacheUsed() {
+      return curBlockCacheUsed;
+    }
 
-	public void setWriteRequestCount(long writeRequestCount) {
-		this.writeRequestCount = writeRequestCount;
-	}
+    public void setCurBlockCacheUsed(float curBlockCacheUsed) {
+      this.curBlockCacheUsed = curBlockCacheUsed;
+    }
 
-	public long getCacheMissCount() {
-		return cacheMissCount;
-	}
+    public float getCurMemStoreUsed() {
+      return curMemStoreUsed;
+    }
 
-	public void setCacheMissCount(long cacheMissCount) {
-		this.cacheMissCount = cacheMissCount;
-	}
-
-	public float getCurBlockCacheUsed() {
-		return curBlockCacheUsed;
-	}
-
-	public void setCurBlockCacheUsed(float curBlockCacheUsed) {
-		this.curBlockCacheUsed = curBlockCacheUsed;
-	}
-
-	public float getCurMemStoreUsed() {
-		return curMemStoreUsed;
-	}
-
-	public void setCurMemStoreUsed(float d) {
-		this.curMemStoreUsed = d;
-	}
+    public void setCurMemStoreUsed(float d) {
+        this.curMemStoreUsed = d;
+    }
   }
 
   /**

@@ -268,7 +268,7 @@ public class HeapMemoryManager {
     }
 
     private void tune() {
-      // TODO check if we can increase the memory boundaries 
+      // TODO check if we can increase the memory boundaries
       // while remaining in the limits
       long curEvictCount;
       long curCacheMisCount;

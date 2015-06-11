@@ -84,7 +84,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.06f);
     try {
       new HeapMemoryManager(blockCache, memStoreFlusher,
-    		  new RegionServerStub(conf), new RegionServerAccountingStub());
+          new RegionServerStub(conf), new RegionServerAccountingStub());
       fail();
     } catch (RuntimeException e) {
     }
@@ -93,12 +93,12 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     try {
       new HeapMemoryManager(blockCache, memStoreFlusher,
-    		  new RegionServerStub(conf), new RegionServerAccountingStub());
+          new RegionServerStub(conf), new RegionServerAccountingStub());
       fail();
     } catch (RuntimeException e) {
     }
   }
-  
+
   @Test
   public void testWhenClusterIsWriteHeavyWithEmptyMemstore() throws Exception {
     BlockCacheStub blockCache = new BlockCacheStub((long) (maxHeapSize * 0.4));
@@ -115,7 +115,7 @@ public class TestHeapMemoryManager {
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), regionServerAccounting);
+        new RegionServerStub(conf), regionServerAccounting);
     long oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
@@ -148,7 +148,7 @@ public class TestHeapMemoryManager {
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), regionServerAccounting);
+        new RegionServerStub(conf), regionServerAccounting);
     long oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
@@ -161,7 +161,7 @@ public class TestHeapMemoryManager {
     assertEquals(oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
     assertEquals(oldBlockCacheSize, blockCache.maxSize);
   }
-  
+
   @Test
   public void testWhenClusterIsWriteHeavy() throws Exception {
     BlockCacheStub blockCache = new BlockCacheStub((long) (maxHeapSize * 0.4));
@@ -178,7 +178,7 @@ public class TestHeapMemoryManager {
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), regionServerAccounting);
+        new RegionServerStub(conf), regionServerAccounting);
     long oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
@@ -223,7 +223,7 @@ public class TestHeapMemoryManager {
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), new RegionServerAccountingStub());
+        new RegionServerStub(conf), new RegionServerAccountingStub());
     long oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
@@ -261,7 +261,7 @@ public class TestHeapMemoryManager {
         HeapMemoryTuner.class);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), new RegionServerAccountingStub());
+        new RegionServerStub(conf), new RegionServerAccountingStub());
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
     heapMemoryManager.start(choreService);
     // Now we wants to be in write mode. Set bigger memstore size from CustomHeapMemoryTuner
@@ -291,7 +291,7 @@ public class TestHeapMemoryManager {
     conf.setClass(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_CLASS, CustomHeapMemoryTuner.class,
         HeapMemoryTuner.class);
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), new RegionServerAccountingStub());
+        new RegionServerStub(conf), new RegionServerAccountingStub());
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
     heapMemoryManager.start(choreService);
     CustomHeapMemoryTuner.memstoreSize = 0.78f;
@@ -316,7 +316,7 @@ public class TestHeapMemoryManager {
     conf.setClass(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_CLASS, CustomHeapMemoryTuner.class,
         HeapMemoryTuner.class);
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), new RegionServerAccountingStub());
+        new RegionServerStub(conf), new RegionServerAccountingStub());
     long oldMemstoreSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
@@ -350,7 +350,7 @@ public class TestHeapMemoryManager {
 
     try {
       heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		  new RegionServerStub(conf), new RegionServerAccountingStub());
+          new RegionServerStub(conf), new RegionServerAccountingStub());
       fail("Should have failed as the collective heap memory need is above 80%");
     } catch (Exception e) {
     }
@@ -359,7 +359,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.MEMSTORE_SIZE_MAX_RANGE_KEY, 0.6f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.6f);
     heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
-    		new RegionServerStub(conf), new RegionServerAccountingStub());
+        new RegionServerStub(conf), new RegionServerAccountingStub());
     long oldMemstoreSize = memStoreFlusher.memstoreSize;
     long oldBlockCacheSize = blockCache.maxSize;
     final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
@@ -396,7 +396,7 @@ public class TestHeapMemoryManager {
     CacheStats stats = new CacheStats("test");
     long maxSize = 0;
     private long testBlockSize = 0;
-    
+
     public BlockCacheStub(long size){
       this.maxSize = size;
     }
@@ -604,15 +604,15 @@ public class TestHeapMemoryManager {
       return result;
     }
   }
-  
+
   private static class RegionServerAccountingStub extends RegionServerAccounting {
     private long testMemstoreSize = 0;
     @Override
     public long getGlobalMemstoreSize() {
-    	return testMemstoreSize;
+      return testMemstoreSize;
     }
     public void setTestMemstoreSize(long testMemstoreSize) {
-    	this.testMemstoreSize = testMemstoreSize;
+      this.testMemstoreSize = testMemstoreSize;
     }
   }
 }

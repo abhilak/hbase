@@ -62,7 +62,7 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
   // provided to it then corresponding component will be considered to have sufficient memory
   public static final float DEFAULT_SUFFICIENT_MEMORY_LEVEL_VALUE = 0.5f; // 50%
   // Large constant value assigned to percent changes when its undefined
-  public static final float undefinedPercentChange = 1.0f;
+  public static final float undefinedPercentChange = 1.0f; // 100%
   private static final TunerResult NO_OP_TUNER_RESULT = new TunerResult(false);
 
   private Log LOG = LogFactory.getLog(DefaultHeapMemoryTuner.class);

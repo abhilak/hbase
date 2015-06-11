@@ -248,6 +248,50 @@ public class TestHeapMemoryManager {
   }
 
   @Test
+  public void testWhenClusterIsHavingMoreWritesThanReads() throws Exception {
+    BlockCacheStub blockCache = new BlockCacheStub((long) (maxHeapSize * 0.4));
+    MemstoreFlusherStub memStoreFlusher = new MemstoreFlusherStub((long) (maxHeapSize * 0.4));
+    RegionServerAccountingStub regionServerAccounting = new RegionServerAccountingStub();
+    // Both memstore and block cache are nearly filled
+    blockCache.setTestBlockSize(0);
+    regionServerAccounting.setTestMemstoreSize((long) (maxHeapSize * 0.4 * 0.8));
+    blockCache.setTestBlockSize((long) (maxHeapSize * 0.4 * 0.8));
+    Configuration conf = HBaseConfiguration.create();
+    conf.setFloat(HeapMemoryManager.MEMSTORE_SIZE_MAX_RANGE_KEY, 0.75f);
+    conf.setFloat(HeapMemoryManager.MEMSTORE_SIZE_MIN_RANGE_KEY, 0.10f);
+    conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
+    conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.05f);
+    conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    // Let the system start with default values for memstore heap and block cache size.
+    HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
+        new RegionServerStub(conf), regionServerAccounting);
+    long oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
+    long oldBlockCacheSize = blockCache.maxSize;
+    final ChoreService choreService = new ChoreService("TEST_SERVER_NAME");
+    heapMemoryManager.start(choreService);
+    memStoreFlusher.flushType = FlushType.ABOVE_HIGHER_MARK;
+    memStoreFlusher.requestFlush(null, false);
+    memStoreFlusher.requestFlush(null, false);
+    memStoreFlusher.requestFlush(null, false);
+    blockCache.evictBlock(null);
+    memStoreFlusher.flushType = FlushType.ABOVE_LOWER_MARK;
+    memStoreFlusher.requestFlush(null, false);
+    Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
+    // No changes should happen as there is undefined increase in flushes and evictions
+    assertEquals(oldMemstoreHeapSize, memStoreFlusher.memstoreSize);
+    assertEquals(oldBlockCacheSize, blockCache.maxSize);
+    // Do some more flushes before the next run of HeapMemoryTuner
+    memStoreFlusher.flushType = FlushType.ABOVE_HIGHER_MARK;
+    memStoreFlusher.requestFlush(null, false);
+    memStoreFlusher.requestFlush(null, false);
+    Thread.sleep(1500);
+    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE, oldMemstoreHeapSize,
+        memStoreFlusher.memstoreSize);
+    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE), oldBlockCacheSize,
+        blockCache.maxSize);
+  }
+
+  @Test
   public void testPluggingInHeapMemoryTuner() throws Exception {
     BlockCacheStub blockCache = new BlockCacheStub((long) (maxHeapSize * 0.4));
     MemstoreFlusherStub memStoreFlusher = new MemstoreFlusherStub((long) (maxHeapSize * 0.4));

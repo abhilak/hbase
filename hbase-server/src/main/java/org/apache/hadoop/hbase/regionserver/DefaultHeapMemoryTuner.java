@@ -52,9 +52,10 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
       "hbase.regionserver.heapmemory.autotuner.step.min.gain";
   public static final String SUFFICIENT_MEMORY_LEVEL_KEY =
       "hbase.regionserver.heapmemory.autotuner.sufficient.memory.level";
+  public static final String LOOKUP_PERIODS_KEY =
+      "hbase.regionserver.heapmemory.autotuner.lookup.periods";
   public static final float DEFAULT_STEP_VALUE = 0.02f; // 2%
   // Fraction change less than this will not be considered harmful
-  // TODO dynamically calculate tolerance from standard deviation of percent changes
   public static final float DEFAULT_MAX_ALLOWED_LOSS_VALUE = 0.01f; // 1%
   // Fraction change less than this will not be considered useful
   public static final float DEFAULT_MIN_EXPECTED_GAIN_VALUE = 0.005f; // 0.5%
@@ -63,6 +64,8 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
   public static final float DEFAULT_SUFFICIENT_MEMORY_LEVEL_VALUE = 0.5f; // 50%
   // Large constant value assigned to percent changes when its undefined
   public static final float undefinedPercentChange = 1.0f; // 100%
+  // This will cover variations over past 1 hr according to default tuner period
+  public static final int DEFAULT_LOOKUP_PERIODS = 60;
   private static final TunerResult NO_OP_TUNER_RESULT = new TunerResult(false);
 
   private Log LOG = LogFactory.getLog(DefaultHeapMemoryTuner.class);
@@ -72,16 +75,18 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
   private float maximumAllowedLoss = DEFAULT_MAX_ALLOWED_LOSS_VALUE;
   private float minimumExpectedGain = DEFAULT_MIN_EXPECTED_GAIN_VALUE;
   private float sufficientMemoryLevel = DEFAULT_SUFFICIENT_MEMORY_LEVEL_VALUE;
+  private int tunerLookupPeriods = DEFAULT_LOOKUP_PERIODS;
 
   private float globalMemStorePercentMinRange;
   private float globalMemStorePercentMaxRange;
   private float blockCachePercentMinRange;
   private float blockCachePercentMaxRange;
+  private RollingStatCalculator rollingStatsForCacheMisses;
+  private RollingStatCalculator rollingStatsForFlushes;
 
   private StepDirection prevTuneDirection = StepDirection.NEUTRAL;
   private long prevFlushCount = 0;
   private long prevEvictCount = 0;
-  private long prevCacheMissCount = 0;
 
   @Override
   public TunerResult tune(TunerContext context) {
@@ -89,18 +94,20 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     long unblockedFlushCount = context.getUnblockedFlushCount();
     long evictCount = context.getEvictCount();
     long cacheMissCount = context.getCacheMissCount();
+    long totalFulshCount = blockedFlushCount+unblockedFlushCount;
+    rollingStatsForCacheMisses.insertDataValue(cacheMissCount);
+    rollingStatsForFlushes.insertDataValue(totalFulshCount);
     StepDirection newTuneDirection = StepDirection.NEUTRAL;
     String tunerLog = "";
     // We can consider memstore or block cache to be sufficient if
     // we are using only a minor fraction of what have been already provided to it
-    boolean earlyMemstoreSufficientCheck = (blockedFlushCount == 0 && unblockedFlushCount == 0)
+    boolean earlyMemstoreSufficientCheck = totalFulshCount == 0
             || context.getCurMemStoreUsed() < context.getCurMemStoreSize()*sufficientMemoryLevel;
     boolean earlyBlockCacheSufficientCheck = evictCount == 0 ||
             context.getCurBlockCacheUsed() < context.getCurBlockCacheSize()*sufficientMemoryLevel;
     if (earlyMemstoreSufficientCheck && earlyBlockCacheSufficientCheck) {
-      prevFlushCount = blockedFlushCount + unblockedFlushCount;
+      prevFlushCount = totalFulshCount;
       prevEvictCount = evictCount;
-      prevCacheMissCount = cacheMissCount;
       prevTuneDirection = StepDirection.NEUTRAL;
       return NO_OP_TUNER_RESULT;
     }
@@ -115,7 +122,6 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     } else {
       float percentChangeInEvictCount;
       float percentChangeInFlushes;
-      float percentChangeInMisses;
       if (prevEvictCount != 0) {
         percentChangeInEvictCount  = (float)(evictCount-prevEvictCount)/(float)(prevEvictCount);
       } else {
@@ -123,16 +129,10 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
         percentChangeInEvictCount  = undefinedPercentChange;
       }
       if (prevFlushCount != 0) {
-        percentChangeInFlushes = (float)(blockedFlushCount + unblockedFlushCount -
+        percentChangeInFlushes = (float)(totalFulshCount -
             prevFlushCount)/(float)(prevFlushCount);
       } else {
         percentChangeInFlushes = undefinedPercentChange;
-      }
-      if (prevCacheMissCount != 0) {
-        percentChangeInMisses = (float)(cacheMissCount-prevCacheMissCount)/
-            (float)(prevCacheMissCount);
-      } else {
-        percentChangeInMisses = undefinedPercentChange;
       }
       boolean isReverting = false;
       switch (prevTuneDirection) {
@@ -169,18 +169,26 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
         break;
       }
       if (!isReverting){
-        if (percentChangeInEvictCount < maximumAllowedLoss &&
-            percentChangeInFlushes < maximumAllowedLoss) {
+        // mean +- deviation/2 is considered to be normal 
+        // below it its consider low and above it its considered high
+        if ((double)cacheMissCount < rollingStatsForCacheMisses.getMean() -
+            rollingStatsForCacheMisses.getDeviation()/2.00 &&
+            (double)totalFulshCount < rollingStatsForFlushes.getMean() -
+            rollingStatsForFlushes.getDeviation()/2.00) {
           // Everything is fine no tuning required
           newTuneDirection = StepDirection.NEUTRAL;
-        } else if (percentChangeInMisses > maximumAllowedLoss &&
-            percentChangeInFlushes < maximumAllowedLoss) {
-          // more misses , increasing cahce size
+        } else if ((double)cacheMissCount > rollingStatsForCacheMisses.getMean() +
+            rollingStatsForCacheMisses.getDeviation()/2.00 &&
+            (double)totalFulshCount < rollingStatsForFlushes.getMean() -
+            rollingStatsForFlushes.getDeviation()/2.00) {
+          // more misses , increasing cache size
           newTuneDirection = StepDirection.INCREASE_BLOCK_CACHE_SIZE;
           tunerLog +=
               "Increasing block cache size as observed increase in number of cache misses.";
-        } else if (percentChangeInFlushes > maximumAllowedLoss &&
-            percentChangeInMisses < maximumAllowedLoss) {
+        } else if ((double)cacheMissCount < rollingStatsForCacheMisses.getMean() -
+            rollingStatsForCacheMisses.getDeviation()/2.00 &&
+            (double)totalFulshCount > rollingStatsForFlushes.getMean() +
+            rollingStatsForFlushes.getDeviation()/2.00) {
           // more flushes , increasing memstore size
           newTuneDirection = StepDirection.INCREASE_MEMSTORE_SIZE;
           tunerLog += "Increasing memstore size as observed increase in number of flushes.";
@@ -200,9 +208,8 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
         newMemstoreSize = context.getCurMemStoreSize() + step;
         break;
     default:
-        prevFlushCount = blockedFlushCount + unblockedFlushCount;
+        prevFlushCount = totalFulshCount;
         prevEvictCount = evictCount;
-        prevCacheMissCount = cacheMissCount;
         prevTuneDirection = StepDirection.NEUTRAL;
         return NO_OP_TUNER_RESULT;
     }
@@ -219,9 +226,8 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     TUNER_RESULT.setBlockCacheSize(newBlockCacheSize);
     TUNER_RESULT.setMemstoreSize(newMemstoreSize);
     LOG.info(tunerLog);
-    prevFlushCount = blockedFlushCount + unblockedFlushCount;
+    prevFlushCount = totalFulshCount;
     prevEvictCount = evictCount;
-    prevCacheMissCount = cacheMissCount;
     prevTuneDirection = newTuneDirection;
     return TUNER_RESULT;
   }
@@ -240,6 +246,7 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     this.maximumAllowedLoss = conf.getFloat(MAX_ALLOWED_LOSS_KEY, DEFAULT_MAX_ALLOWED_LOSS_VALUE);
     this.sufficientMemoryLevel = conf.getFloat(SUFFICIENT_MEMORY_LEVEL_KEY,
         DEFAULT_SUFFICIENT_MEMORY_LEVEL_VALUE);
+    this.tunerLookupPeriods = conf.getInt(LOOKUP_PERIODS_KEY, DEFAULT_LOOKUP_PERIODS);
     this.blockCachePercentMinRange = conf.getFloat(BLOCK_CACHE_SIZE_MIN_RANGE_KEY,
         conf.getFloat(HFILE_BLOCK_CACHE_SIZE_KEY, HConstants.HFILE_BLOCK_CACHE_SIZE_DEFAULT));
     this.blockCachePercentMaxRange = conf.getFloat(BLOCK_CACHE_SIZE_MAX_RANGE_KEY,
@@ -248,6 +255,8 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
         HeapMemorySizeUtil.getGlobalMemStorePercent(conf, false));
     this.globalMemStorePercentMaxRange = conf.getFloat(MEMSTORE_SIZE_MAX_RANGE_KEY,
         HeapMemorySizeUtil.getGlobalMemStorePercent(conf, false));
+    this.rollingStatsForCacheMisses = new RollingStatCalculator(this.tunerLookupPeriods);
+    this.rollingStatsForFlushes = new RollingStatCalculator(this.tunerLookupPeriods);
   }
 
   private enum StepDirection{
@@ -257,5 +266,73 @@ class DefaultHeapMemoryTuner implements HeapMemoryTuner {
     INCREASE_MEMSTORE_SIZE,
     // no operation was performed
     NEUTRAL
+  }
+
+  /**
+   * This class will help maintaining mean and standard deviation.
+   * Initialized with number of rolling periods which basically means number of past periods 
+   * whose data will be considered for maintaining mean and deviation. It will take O(N) memory 
+   * to maintain it, where N is number of look up periods. It can be used when we have varying 
+   * trends of reads and write.
+   * If zero is passed then it will maintain mean and variance from the starting point. It will use 
+   * O(1) memory only. But note that since it will maintain mean / deviation from the start 
+   * they may behave like constants and will ignore short trends.
+   */
+  public class RollingStatCalculator {
+    private double currentSum;
+    private double currentSqrSum;
+    private long numberOfDataValues;
+    private int rollingPeriod;
+    private int currentIndexPosition;
+    private long [] dataValues;
+
+    public RollingStatCalculator(int rollingPeriod) {
+      this.rollingPeriod = rollingPeriod;
+      this.dataValues = initializeZeros(rollingPeriod);
+      this.currentSum = 0.0;
+      this.currentSqrSum = 0.0;
+      this.currentIndexPosition = 0;
+      this.numberOfDataValues = 0;
+    }
+
+    public void insertDataValue(long data) {
+      // if current number of data points already equals rolling period
+      // remove one data and adjust the every thing
+      if(numberOfDataValues >= rollingPeriod && rollingPeriod > 0) {
+        this.removeData(dataValues[currentIndexPosition]);
+      }
+      numberOfDataValues++;
+      currentSum = currentSum + (double)data;
+      currentSqrSum = currentSqrSum + ((double)data * data);
+      if (rollingPeriod >0)
+      {
+        dataValues[currentIndexPosition] = data;
+        currentIndexPosition = (currentIndexPosition + 1) % rollingPeriod;   
+      }
+    }
+
+    private void removeData(long data) {
+      currentSum = currentSum + (double)data;
+      currentSqrSum = currentSqrSum + ((double)data * data);
+      numberOfDataValues--;
+    }
+
+    public double getMean() {
+      return this.currentSum / (double)numberOfDataValues;
+    }
+
+    public double getDeviation() {
+      double variance = (currentSqrSum - (currentSum*currentSum)/(double)(numberOfDataValues))/
+          numberOfDataValues;
+      return Math.sqrt(variance);
+    }
+
+    private long [] initializeZeros(int n) {
+      long [] zeros = new long [n];
+      for (int i=0; i<n; i++) {
+        zeros[i] = 0L;
+      }
+      return zeros;
+    }
   }
 }

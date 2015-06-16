@@ -113,6 +113,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.05f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
         new RegionServerStub(conf), regionServerAccounting);
@@ -146,6 +147,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.05f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
         new RegionServerStub(conf), regionServerAccounting);
@@ -176,6 +178,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.05f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
         new RegionServerStub(conf), regionServerAccounting);
@@ -190,9 +193,9 @@ public class TestHeapMemoryManager {
     memStoreFlusher.flushType = FlushType.ABOVE_LOWER_MARK;
     memStoreFlusher.requestFlush(null, false);
     Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE, oldMemstoreHeapSize,
+    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE), oldBlockCacheSize,
+    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldBlockCacheSize,
         blockCache.maxSize);
     oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     oldBlockCacheSize = blockCache.maxSize;
@@ -201,9 +204,9 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
     Thread.sleep(1500);
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE, oldMemstoreHeapSize,
+    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE), oldBlockCacheSize,
+    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldBlockCacheSize,
         blockCache.maxSize);
   }
 
@@ -221,6 +224,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.05f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
         new RegionServerStub(conf), new RegionServerAccountingStub());
@@ -232,18 +236,18 @@ public class TestHeapMemoryManager {
     blockCache.evictBlock(null);
     blockCache.evictBlock(null);
     Thread.sleep(1500); // Allow the tuner to run once and do necessary memory up
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE), oldMemstoreHeapSize,
+    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE, oldBlockCacheSize,
+    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldBlockCacheSize,
         blockCache.maxSize);
     oldMemstoreHeapSize = memStoreFlusher.memstoreSize;
     oldBlockCacheSize = blockCache.maxSize;
     // Do some more evictions before the next run of HeapMemoryTuner
     blockCache.evictBlock(null);
     Thread.sleep(1500);
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE), oldMemstoreHeapSize,
+    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE, oldBlockCacheSize,
+    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldBlockCacheSize,
         blockCache.maxSize);
   }
 
@@ -262,6 +266,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.05f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     // Let the system start with default values for memstore heap and block cache size.
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
         new RegionServerStub(conf), regionServerAccounting);
@@ -285,9 +290,9 @@ public class TestHeapMemoryManager {
     memStoreFlusher.requestFlush(null, false);
     memStoreFlusher.requestFlush(null, false);
     Thread.sleep(1500);
-    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE, oldMemstoreHeapSize,
+    assertHeapSpaceDelta(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE, oldMemstoreHeapSize,
         memStoreFlusher.memstoreSize);
-    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_STEP_VALUE), oldBlockCacheSize,
+    assertHeapSpaceDelta(-(DefaultHeapMemoryTuner.DEFAULT_MAX_STEP_VALUE), oldBlockCacheSize,
         blockCache.maxSize);
   }
 
@@ -301,6 +306,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.75f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.02f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     conf.setClass(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_CLASS, CustomHeapMemoryTuner.class,
         HeapMemoryTuner.class);
     // Let the system start with default values for memstore heap and block cache size.
@@ -332,6 +338,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.1f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     conf.setClass(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_CLASS, CustomHeapMemoryTuner.class,
         HeapMemoryTuner.class);
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
@@ -357,6 +364,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.1f);
     conf.setLong(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_PERIOD, 1000);
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     conf.setClass(HeapMemoryManager.HBASE_RS_HEAP_MEMORY_TUNER_CLASS, CustomHeapMemoryTuner.class,
         HeapMemoryTuner.class);
     HeapMemoryManager heapMemoryManager = new HeapMemoryManager(blockCache, memStoreFlusher,
@@ -382,7 +390,7 @@ public class TestHeapMemoryManager {
     conf.setFloat(HeapMemoryManager.MEMSTORE_SIZE_MIN_RANGE_KEY, 0.1f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MAX_RANGE_KEY, 0.7f);
     conf.setFloat(HeapMemoryManager.BLOCK_CACHE_SIZE_MIN_RANGE_KEY, 0.1f);
-
+    conf.setInt(DefaultHeapMemoryTuner.NUM_PERIODS_TO_IGNORE, 0);
     conf.setFloat(HeapMemorySizeUtil.MEMSTORE_SIZE_KEY, 0.4F);
     conf.setFloat(HConstants.HFILE_BLOCK_CACHE_SIZE_KEY, 0.3F);
     conf.setFloat(HConstants.BUCKET_CACHE_SIZE_KEY, 0.1F);
@@ -427,12 +435,16 @@ public class TestHeapMemoryManager {
     assertEquals(expected, currentHeapSpace);
   }
 
-  private void assertHeapSpaceDelta(float expectedDeltaPercent, long oldHeapSpace, long newHeapSpace) {
-    long expctedMinDelta = (long) (this.maxHeapSize * expectedDeltaPercent);
+  private void assertHeapSpaceDelta(double expectedDeltaPercent, long oldHeapSpace, long newHeapSpace) {
+    double expctedMinDelta = (double) (this.maxHeapSize * expectedDeltaPercent);
+    // Tolerable error
+    double error = 0.999;
     if (expectedDeltaPercent > 0) {
-      assertTrue(expctedMinDelta <= (newHeapSpace - oldHeapSpace));
+      assertTrue(expctedMinDelta*error <= (double)(newHeapSpace - oldHeapSpace));
+      assertTrue(expctedMinDelta/error >= (double)(newHeapSpace - oldHeapSpace));
     } else {
-      assertTrue(expctedMinDelta <= (oldHeapSpace - newHeapSpace));
+      assertTrue(-expctedMinDelta*error <= (double)(oldHeapSpace - newHeapSpace));
+      assertTrue(-expctedMinDelta/error >= (double)(oldHeapSpace - newHeapSpace));
     }
   }
 

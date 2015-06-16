@@ -336,7 +336,7 @@ public class HeapMemoryManager {
           memStoreFlusher.setGlobalMemstoreLimit(newMemstoreSize);
         }
       } else if (LOG.isDebugEnabled()) {
-          LOG.debug("No changes made by HeapMemoryTuner.");
+        LOG.debug("No changes made by HeapMemoryTuner.");
       }
     }
 
